@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState, useLayoutEffect } from 'react';
 import type { CloudSettings, DrawMode } from '../utils/types';
 import type { Ellipse } from '../utils/puffs';
 import { MASTER } from '../utils/puffs';
@@ -11,12 +11,8 @@ import { DrawingCanvas } from '../components/molecules/DrawingCanvas/DrawingCanv
 import type { DrawingCanvasHandle } from '../components/molecules/DrawingCanvas/DrawingCanvas';
 
 const FIXED_VIEWBOX = `0 0 ${CANVAS_W} ${CANVAS_H}`;
+const ASPECT = CANVAS_W / CANVAS_H;
 
-/**
- * Rasterise the default MASTER ellipses onto an offscreen canvas and run
- * shapeToMaster so the initial cloud is drawn the same way as user-drawn shapes.
- * Computed once (lazy useState initialiser).
- */
 function computeInitialMaster(): Ellipse[] {
   const canvas = document.createElement('canvas');
   canvas.width = CANVAS_W;
@@ -36,15 +32,29 @@ export function CloudStylerPage() {
   const [note, setNote] = useState('');
   const [drawMode, setDrawMode] = useState<DrawMode>(null);
   const [brushSize, setBrushSize] = useState(20);
-  // Always drawing-derived — initialised from MASTER so there's no jump on first stroke.
+  const [overlayOpacity, setOverlayOpacity] = useState(0.4);
   const [customMaster, setCustomMaster] = useState<Ellipse[]>(computeInitialMaster);
+
   const svgRef = useRef<SVGSVGElement>(null);
   const drawingRef = useRef<DrawingCanvasHandle>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
 
-  function update<K extends keyof CloudSettings>(
-    key: K,
-    value: CloudSettings[K],
-  ) {
+  // Wrapper dimensions: letterbox CANVAS_W×CANVAS_H into the stage content area.
+  const [wrapperSize, setWrapperSize] = useState({ w: CANVAS_W, h: CANVAS_H });
+
+  useLayoutEffect(() => {
+    const stage = stageRef.current;
+    if (!stage) return;
+    const ro = new ResizeObserver(([entry]) => {
+      const { width, height } = entry.contentRect;
+      const scale = Math.min(width / CANVAS_W, height / CANVAS_H);
+      setWrapperSize({ w: Math.floor(CANVAS_W * scale), h: Math.floor(CANVAS_H * scale) });
+    });
+    ro.observe(stage);
+    return () => ro.disconnect();
+  }, []);
+
+  function update<K extends keyof CloudSettings>(key: K, value: CloudSettings[K]) {
     setSettings((prev) => {
       const next = { ...prev, [key]: value };
       if (key === 'dens' && next.lockGrid) next.grid = Math.ceil(next.dens);
@@ -67,22 +77,18 @@ export function CloudStylerPage() {
 
   function handleClearDrawing() {
     drawingRef.current?.clear();
-    // onShapeChange([]) fires from inside clear() → setCustomMaster([])
   }
 
   function handleReset() {
     setSettings(DEFAULTS);
     setDrawMode(null);
     setBrushSize(20);
+    setOverlayOpacity(0.4);
     setNote('');
-    // Re-draw the default shape on the canvas and sync customMaster
-    const initial = computeInitialMaster();
-    setCustomMaster(initial);
+    setCustomMaster(computeInitialMaster());
     drawingRef.current?.initialize(MASTER);
   }
 
-  // buildPuffs always uses the drawing-derived master (never the hardcoded MASTER).
-  // Only dens, grid, and customMaster affect puff placement — not appearance settings.
   const { puffs: rawPuffs, baseCount } = useMemo(
     () => buildPuffs(settings.dens, settings.grid, customMaster),
     [settings.dens, settings.grid, customMaster],
@@ -120,10 +126,9 @@ export function CloudStylerPage() {
       clone.setAttribute('width', String(svgW));
       clone.setAttribute('height', String(svgH));
 
-      const svgBlob = new Blob(
-        [new XMLSerializer().serializeToString(clone)],
-        { type: 'image/svg+xml' },
-      );
+      const svgBlob = new Blob([new XMLSerializer().serializeToString(clone)], {
+        type: 'image/svg+xml',
+      });
       const svgUrl = URL.createObjectURL(svgBlob);
       const img = new Image();
       await new Promise<void>((res, rej) => {
@@ -168,22 +173,44 @@ export function CloudStylerPage() {
     }
   }
 
+  // Keep TypeScript happy: ASPECT is used in the JSX comment below
+  void ASPECT;
+
   return (
     <div className="flex min-h-screen max-[880px]:flex-col">
-      <div className="stage flex-1 min-h-[46vh] flex items-center justify-center p-6 bg-[radial-gradient(120%_90%_at_50%_0%,#cfe2f1_0%,#dceaf4_55%,#e9f1f8_100%)] relative overflow-hidden">
-        <Cloud
-          ref={svgRef}
-          settings={settings}
-          puffs={puffs}
-          fixedViewBox={FIXED_VIEWBOX}
-        />
-        <DrawingCanvas
-          ref={drawingRef}
-          mode={drawMode}
-          brushSize={brushSize}
-          onShapeChange={handleShapeChange}
-          initialEllipses={MASTER}
-        />
+      {/*
+        Stage: flex container with padding. stageRef measures the content area
+        so the ResizeObserver can compute an exact letterboxed wrapper size.
+      */}
+      <div
+        ref={stageRef}
+        className="flex-1 min-h-[46vh] flex items-center justify-center p-6 bg-[radial-gradient(120%_90%_at_50%_0%,#cfe2f1_0%,#dceaf4_55%,#e9f1f8_100%)]"
+      >
+        {/*
+          Wrapper: pixel-exact size of the letterboxed SVG area.
+          Both Cloud and DrawingCanvas fill this div, so their coordinate
+          spaces are identical at every viewport size.
+        */}
+        <div
+          className="relative"
+          style={{ width: wrapperSize.w, height: wrapperSize.h }}
+        >
+          <Cloud
+            ref={svgRef}
+            settings={settings}
+            puffs={puffs}
+            fixedViewBox={FIXED_VIEWBOX}
+          />
+          <DrawingCanvas
+            ref={drawingRef}
+            mode={drawMode}
+            brushSize={brushSize}
+            overlayOpacity={overlayOpacity}
+            brushColor={settings.col}
+            onShapeChange={handleShapeChange}
+            initialEllipses={MASTER}
+          />
+        </div>
       </div>
       <ControlPanel
         settings={settings}
@@ -192,6 +219,8 @@ export function CloudStylerPage() {
         onToggleDrawMode={toggleDrawMode}
         brushSize={brushSize}
         onBrushSizeChange={setBrushSize}
+        overlayOpacity={overlayOpacity}
+        onOverlayOpacityChange={setOverlayOpacity}
         onUndo={handleUndo}
         onClearDrawing={handleClearDrawing}
         hasDrawing={customMaster.length > 0}

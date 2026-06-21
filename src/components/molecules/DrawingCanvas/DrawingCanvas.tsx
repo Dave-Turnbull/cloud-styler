@@ -11,31 +11,26 @@ export interface DrawingCanvasHandle {
 interface DrawingCanvasProps {
   mode: 'brush' | 'eraser' | null;
   brushSize: number;
+  /** 0–1. Active-stroke opacity; hovering shows this × 0.375. */
+  overlayOpacity: number;
+  /** Colour used for brush strokes (should match the cloud colour). */
+  brushColor: string;
   onShapeChange: (master: Ellipse[]) => void;
-  /** Ellipses to pre-draw on first mount (without triggering onShapeChange). */
   initialEllipses: Ellipse[];
-}
-
-interface CursorState {
-  /** CSS px offset from canvas left edge */
-  x: number;
-  /** CSS px offset from canvas top edge */
-  y: number;
-  /** Brush radius in CSS px (accounts for canvas display scale) */
-  r: number;
 }
 
 const DEBOUNCE_MS = 500;
 
 export const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
-  ({ mode, brushSize, onShapeChange, initialEllipses }, ref) => {
+  ({ mode, brushSize, overlayOpacity, brushColor, onShapeChange, initialEllipses }, ref) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
+    const cursorRef = useRef<HTMLDivElement>(null);
     const isDownRef = useRef(false);
     const lastPosRef = useRef<{ x: number; y: number } | null>(null);
     const undoStackRef = useRef<string[]>([]);
     const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    // Only isDown drives React state (changes twice per stroke, not per move).
     const [isDown, setIsDown] = useState(false);
-    const [cursor, setCursor] = useState<CursorState | null>(null);
 
     function getCtx() {
       return canvasRef.current!.getContext('2d')!;
@@ -44,7 +39,7 @@ export const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>
     function drawEllipsesOnCtx(ctx: CanvasRenderingContext2D, ellipses: Ellipse[]) {
       ctx.save();
       ctx.globalCompositeOperation = 'source-over';
-      ctx.fillStyle = 'rgba(255,255,255,1)';
+      ctx.fillStyle = brushColor;
       for (const e of ellipses) {
         ctx.beginPath();
         ctx.ellipse(e.cx, e.cy, e.rx, e.ry, 0, 0, Math.PI * 2);
@@ -53,14 +48,36 @@ export const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>
       ctx.restore();
     }
 
-    // Pre-draw the initial shape on mount. Parent already has the matching master
-    // pre-computed, so we don't fire onShapeChange here.
+    // Pre-draw initial shape on mount — parent already has the matching master.
     useEffect(() => {
       const ctx = getCtx();
       ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
       drawEllipsesOnCtx(ctx, initialEllipses);
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
+
+    // Keep cursor ring colour in sync with mode/brushColor without mouse moves.
+    useEffect(() => {
+      const el = cursorRef.current;
+      if (!el) return;
+      if (!mode) {
+        el.style.display = 'none';
+        return;
+      }
+      el.style.borderColor =
+        mode === 'eraser' ? 'rgba(255,100,100,0.9)' : brushColor;
+    }, [mode, brushColor]);
+
+    // Resize cursor ring when brushSize changes while hovering.
+    useEffect(() => {
+      const el = cursorRef.current;
+      const canvas = canvasRef.current;
+      if (!el || !canvas || el.style.display === 'none') return;
+      const scale = canvas.getBoundingClientRect().width / CANVAS_W;
+      const r = brushSize * scale;
+      el.style.width = `${r * 2}px`;
+      el.style.height = `${r * 2}px`;
+    }, [brushSize]);
 
     function fireShapeChange() {
       const canvas = canvasRef.current;
@@ -128,14 +145,23 @@ export const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>
       };
     }
 
-    function updateCursor(clientX: number, clientY: number) {
-      if (!mode) return;
-      const rect = canvasRef.current!.getBoundingClientRect();
-      setCursor({
-        x: clientX - rect.left,
-        y: clientY - rect.top,
-        r: brushSize * (rect.width / CANVAS_W),
-      });
+    // Update cursor ring via direct DOM ref — avoids React re-renders on every move.
+    function moveCursor(clientX: number, clientY: number) {
+      const el = cursorRef.current;
+      const canvas = canvasRef.current;
+      if (!el || !canvas || !mode) return;
+      const rect = canvas.getBoundingClientRect();
+      const r = brushSize * (rect.width / CANVAS_W);
+      el.style.display = 'block';
+      el.style.left = `${clientX - rect.left}px`;
+      el.style.top = `${clientY - rect.top}px`;
+      el.style.width = `${r * 2}px`;
+      el.style.height = `${r * 2}px`;
+    }
+
+    function hideCursor() {
+      const el = cursorRef.current;
+      if (el) el.style.display = 'none';
     }
 
     function paint(from: { x: number; y: number }, to: { x: number; y: number }) {
@@ -143,8 +169,8 @@ export const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>
       ctx.save();
       ctx.globalCompositeOperation =
         mode === 'eraser' ? 'destination-out' : 'source-over';
-      ctx.fillStyle = 'rgba(255,255,255,1)';
-      ctx.strokeStyle = 'rgba(255,255,255,1)';
+      ctx.fillStyle = brushColor;
+      ctx.strokeStyle = brushColor;
       ctx.lineWidth = brushSize * 2;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
@@ -170,7 +196,7 @@ export const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>
     }
 
     function onPointerMove(clientX: number, clientY: number) {
-      updateCursor(clientX, clientY);
+      moveCursor(clientX, clientY);
       if (!isDownRef.current || !mode) return;
       const pos = getCanvasCoords(clientX, clientY);
       paint(lastPosRef.current!, pos);
@@ -187,12 +213,9 @@ export const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>
     }
 
     function handleMouseLeave() {
-      setCursor(null);
+      hideCursor();
       onPointerUp();
     }
-
-    const cursorColor =
-      mode === 'eraser' ? 'rgba(255,100,100,0.9)' : 'rgba(100,140,255,0.9)';
 
     return (
       <>
@@ -205,11 +228,12 @@ export const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>
             inset: 0,
             width: '100%',
             height: '100%',
-            // Visible at 15% when mode is active (guide), 40% while actively painting
-            opacity: isDown ? 0.4 : mode ? 0.15 : 0,
+            opacity: isDown ? overlayOpacity : mode ? overlayOpacity * 0.375 : 0,
             cursor: mode ? 'none' : 'default',
             pointerEvents: mode ? 'auto' : 'none',
             touchAction: 'none',
+            // Own GPU layer so canvas repaints don't invalidate the SVG filter cache.
+            willChange: 'contents',
           }}
           onMouseDown={(e) => { e.preventDefault(); onPointerDown(e.clientX, e.clientY); }}
           onMouseMove={(e) => onPointerMove(e.clientX, e.clientY)}
@@ -220,22 +244,19 @@ export const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>
           onTouchEnd={(e) => { e.preventDefault(); onPointerUp(); }}
           onTouchCancel={(e) => { e.preventDefault(); onPointerUp(); }}
         />
-        {cursor && mode && (
-          <div
-            style={{
-              position: 'absolute',
-              left: cursor.x,
-              top: cursor.y,
-              width: cursor.r * 2,
-              height: cursor.r * 2,
-              transform: 'translate(-50%, -50%)',
-              borderRadius: '50%',
-              border: `2px solid ${cursorColor}`,
-              boxShadow: '0 0 0 1px rgba(0,0,0,0.25)',
-              pointerEvents: 'none',
-            }}
-          />
-        )}
+        {/* Cursor ring — always mounted, positioned/shown via ref to avoid re-renders. */}
+        <div
+          ref={cursorRef}
+          style={{
+            display: 'none',
+            position: 'absolute',
+            transform: 'translate(-50%, -50%)',
+            borderRadius: '50%',
+            border: `2px solid ${mode === 'eraser' ? 'rgba(255,100,100,0.9)' : brushColor}`,
+            boxShadow: '0 0 0 1px rgba(0,0,0,0.3), 0 0 0 3px rgba(255,255,255,0.3)',
+            pointerEvents: 'none',
+          }}
+        />
       </>
     );
   },

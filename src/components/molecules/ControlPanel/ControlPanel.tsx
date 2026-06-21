@@ -14,6 +14,8 @@ interface ControlPanelProps {
   onToggleDrawMode: (mode: 'brush' | 'eraser') => void;
   brushSize: number;
   onBrushSizeChange: (size: number) => void;
+  overlayOpacity: number;
+  onOverlayOpacityChange: (v: number) => void;
   onUndo: () => void;
   onClearDrawing: () => void;
   hasDrawing: boolean;
@@ -45,6 +47,8 @@ export function ControlPanel({
   onToggleDrawMode,
   brushSize,
   onBrushSizeChange,
+  overlayOpacity,
+  onOverlayOpacityChange,
   onUndo,
   onClearDrawing,
   hasDrawing,
@@ -98,6 +102,15 @@ export function ControlPanel({
           display={String(brushSize)}
           onChange={onBrushSizeChange}
           disabled={drawMode === null}
+        />
+        <Slider
+          label="Canvas opacity"
+          min={0.05}
+          max={1}
+          step={0.05}
+          value={overlayOpacity}
+          display={`${Math.round(overlayOpacity * 100)}%`}
+          onChange={onOverlayOpacityChange}
         />
         <Hint>
           Draw to replace the default cloud shape. The cloud regenerates on

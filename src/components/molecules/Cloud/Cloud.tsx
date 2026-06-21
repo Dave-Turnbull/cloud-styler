@@ -78,7 +78,15 @@ export const Cloud = forwardRef<SVGSVGElement, CloudProps>(
         xmlns="http://www.w3.org/2000/svg"
         role="img"
         aria-label="Adjustable cloud"
-        style={{ transform, transformOrigin: 'center', opacity: settings.opacity }}
+        style={{
+          transform,
+          transformOrigin: 'center',
+          opacity: settings.opacity,
+          width: '100%',
+          height: '100%',
+          // Separate GPU layer so canvas repaints don't re-evaluate SVG filters.
+          willChange: 'transform',
+        }}
       >
         <defs>
           <radialGradient
