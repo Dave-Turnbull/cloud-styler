@@ -1,0 +1,29 @@
+@import "tailwindcss";
+
+@theme {
+  --color-panel:   #1c2330;
+  --color-panel-2: #232c3c;
+  --color-line:    rgb(51 64 84 / 0.25);
+  --color-ink:     #e7edf6;
+  --color-ink-dim: #9fb0c6;
+  --color-accent:  #86b4e6;
+}
+
+@layer base {
+  html, body, #root { height: 100%; }
+  body {
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    color: #e7edf6;
+    background: #0f141d;
+  }
+}
+
+/* SVG display — kept here because it targets an element type, not a component class */
+.stage svg {
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  display: block;
+  overflow: visible;
+  filter: drop-shadow(0 10px 30px rgba(40, 70, 110, .12));
+}
