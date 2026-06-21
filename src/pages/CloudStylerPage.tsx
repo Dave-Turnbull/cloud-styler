@@ -1,14 +1,45 @@
 import { useMemo, useRef, useState } from 'react';
-import type { CloudSettings } from '../utils/types';
+import type { CloudSettings, DrawMode } from '../utils/types';
+import type { Ellipse } from '../utils/puffs';
+import { MASTER } from '../utils/puffs';
 import { DEFAULTS } from '../utils/defaults';
 import { buildPuffs } from '../utils/puffs';
+import { shapeToMaster, CANVAS_W, CANVAS_H } from '../utils/shapeToMaster';
 import { Cloud } from '../components/molecules/Cloud/Cloud';
 import { ControlPanel } from '../components/molecules/ControlPanel/ControlPanel';
+import { DrawingCanvas } from '../components/molecules/DrawingCanvas/DrawingCanvas';
+import type { DrawingCanvasHandle } from '../components/molecules/DrawingCanvas/DrawingCanvas';
+
+const FIXED_VIEWBOX = `0 0 ${CANVAS_W} ${CANVAS_H}`;
+
+/**
+ * Rasterise the default MASTER ellipses onto an offscreen canvas and run
+ * shapeToMaster so the initial cloud is drawn the same way as user-drawn shapes.
+ * Computed once (lazy useState initialiser).
+ */
+function computeInitialMaster(): Ellipse[] {
+  const canvas = document.createElement('canvas');
+  canvas.width = CANVAS_W;
+  canvas.height = CANVAS_H;
+  const ctx = canvas.getContext('2d')!;
+  ctx.fillStyle = 'white';
+  for (const m of MASTER) {
+    ctx.beginPath();
+    ctx.ellipse(m.cx, m.cy, m.rx, m.ry, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  return shapeToMaster(ctx.getImageData(0, 0, CANVAS_W, CANVAS_H));
+}
 
 export function CloudStylerPage() {
   const [settings, setSettings] = useState<CloudSettings>(DEFAULTS);
   const [note, setNote] = useState('');
+  const [drawMode, setDrawMode] = useState<DrawMode>(null);
+  const [brushSize, setBrushSize] = useState(20);
+  // Always drawing-derived — initialised from MASTER so there's no jump on first stroke.
+  const [customMaster, setCustomMaster] = useState<Ellipse[]>(computeInitialMaster);
   const svgRef = useRef<SVGSVGElement>(null);
+  const drawingRef = useRef<DrawingCanvasHandle>(null);
 
   function update<K extends keyof CloudSettings>(
     key: K,
@@ -22,10 +53,46 @@ export function CloudStylerPage() {
     });
   }
 
-  const puffs = useMemo(
-    () => buildPuffs(settings.dens, settings.grid),
-    [settings.dens, settings.grid],
+  function toggleDrawMode(mode: 'brush' | 'eraser') {
+    setDrawMode((prev) => (prev === mode ? null : mode));
+  }
+
+  function handleShapeChange(master: Ellipse[]) {
+    setCustomMaster(master);
+  }
+
+  function handleUndo() {
+    drawingRef.current?.undo();
+  }
+
+  function handleClearDrawing() {
+    drawingRef.current?.clear();
+    // onShapeChange([]) fires from inside clear() → setCustomMaster([])
+  }
+
+  function handleReset() {
+    setSettings(DEFAULTS);
+    setDrawMode(null);
+    setBrushSize(20);
+    setNote('');
+    // Re-draw the default shape on the canvas and sync customMaster
+    const initial = computeInitialMaster();
+    setCustomMaster(initial);
+    drawingRef.current?.initialize(MASTER);
+  }
+
+  // buildPuffs always uses the drawing-derived master (never the hardcoded MASTER).
+  // Only dens, grid, and customMaster affect puff placement — not appearance settings.
+  const { puffs: rawPuffs, baseCount } = useMemo(
+    () => buildPuffs(settings.dens, settings.grid, customMaster),
+    [settings.dens, settings.grid, customMaster],
   );
+
+  const puffs = useMemo(() => {
+    const base = rawPuffs.slice(0, baseCount);
+    const cloud = rawPuffs.slice(baseCount);
+    return settings.puffDir ? [...base, ...[...cloud].reverse()] : rawPuffs;
+  }, [rawPuffs, baseCount, settings.puffDir]);
 
   async function handleCopy() {
     if (!svgRef.current) return;
@@ -43,10 +110,8 @@ export function CloudStylerPage() {
     try {
       const svg = svgRef.current;
       const vb = svg.viewBox.baseVal;
-      const RES = 2; // 2× for retina-quality output
+      const RES = 2;
 
-      // Clone and strip CSS transform — we'll apply it on the canvas instead
-      // so the output dimensions can accommodate rotation without clipping.
       const clone = svg.cloneNode(true) as SVGSVGElement;
       clone.style.transform = '';
       clone.style.transformOrigin = '';
@@ -68,7 +133,6 @@ export function CloudStylerPage() {
       });
       URL.revokeObjectURL(svgUrl);
 
-      // Expand canvas to fit rotated content without clipping
       const { scale, rotate, flipX, flipY, opacity } = settings;
       const rad = (rotate * Math.PI) / 180;
       const cosA = Math.abs(Math.cos(rad));
@@ -77,12 +141,11 @@ export function CloudStylerPage() {
       const canvasW = Math.round((svgW * cosA + svgH * sinA) * absScale);
       const canvasH = Math.round((svgW * sinA + svgH * cosA) * absScale);
 
-      const canvas = document.createElement('canvas');
-      canvas.width = canvasW;
-      canvas.height = canvasH;
-      const ctx = canvas.getContext('2d')!;
+      const offscreen = document.createElement('canvas');
+      offscreen.width = canvasW;
+      offscreen.height = canvasH;
+      const ctx = offscreen.getContext('2d')!;
 
-      // Transparent background — no fillRect
       ctx.globalAlpha = opacity;
       ctx.translate(canvasW / 2, canvasH / 2);
       ctx.rotate(rad);
@@ -90,7 +153,7 @@ export function CloudStylerPage() {
       ctx.drawImage(img, -svgW / 2, -svgH / 2, svgW, svgH);
 
       const exportBlob = await new Promise<Blob | null>((res) =>
-        canvas.toBlob(res, `image/${format}`, 0.95),
+        offscreen.toBlob(res, `image/${format}`, 0.95),
       );
       if (!exportBlob) throw new Error('Canvas export failed');
 
@@ -105,19 +168,33 @@ export function CloudStylerPage() {
     }
   }
 
-  function handleReset() {
-    setSettings(DEFAULTS);
-    setNote('');
-  }
-
   return (
     <div className="flex min-h-screen max-[880px]:flex-col">
-      <div className="stage flex-1 min-h-[46vh] flex items-center justify-center p-6 bg-[radial-gradient(120%_90%_at_50%_0%,#cfe2f1_0%,#dceaf4_55%,#e9f1f8_100%)]">
-        <Cloud ref={svgRef} settings={settings} puffs={puffs} />
+      <div className="stage flex-1 min-h-[46vh] flex items-center justify-center p-6 bg-[radial-gradient(120%_90%_at_50%_0%,#cfe2f1_0%,#dceaf4_55%,#e9f1f8_100%)] relative overflow-hidden">
+        <Cloud
+          ref={svgRef}
+          settings={settings}
+          puffs={puffs}
+          fixedViewBox={FIXED_VIEWBOX}
+        />
+        <DrawingCanvas
+          ref={drawingRef}
+          mode={drawMode}
+          brushSize={brushSize}
+          onShapeChange={handleShapeChange}
+          initialEllipses={MASTER}
+        />
       </div>
       <ControlPanel
         settings={settings}
         update={update}
+        drawMode={drawMode}
+        onToggleDrawMode={toggleDrawMode}
+        brushSize={brushSize}
+        onBrushSizeChange={setBrushSize}
+        onUndo={handleUndo}
+        onClearDrawing={handleClearDrawing}
+        hasDrawing={customMaster.length > 0}
         onCopy={handleCopy}
         onExport={handleExport}
         onReset={handleReset}

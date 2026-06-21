@@ -1,4 +1,4 @@
-import { forwardRef } from 'react';
+import { forwardRef, useMemo } from 'react';
 import type { CloudSettings } from '../../../utils/types';
 import type { Ellipse } from '../../../utils/puffs';
 import { mixWhite, GRADIENT_STOPS } from '../../../utils/colour';
@@ -6,6 +6,12 @@ import { mixWhite, GRADIENT_STOPS } from '../../../utils/colour';
 interface CloudProps {
   settings: CloudSettings;
   puffs: Ellipse[];
+  /**
+   * When provided, use this viewBox verbatim instead of computing a tight bbox
+   * from puffs. Required for drawing mode so the cloud coordinate space matches
+   * the drawing canvas pixel space (1 canvas px = 1 SVG unit).
+   */
+  fixedViewBox?: string;
 }
 
 /*
@@ -15,33 +21,54 @@ interface CloudProps {
  *   backfill/erode   radius       = inset / n
  */
 export const Cloud = forwardRef<SVGSVGElement, CloudProps>(
-  ({ settings, puffs }, ref) => {
+  ({ settings, puffs, fixedViewBox }, ref) => {
     const n = settings.dens;
 
-    // Whole-cloud transform: flips fold into the scale sign.
     const sx = (settings.flipX ? -1 : 1) * settings.scale;
     const sy = (settings.flipY ? -1 : 1) * settings.scale;
     const transform = `rotate(${settings.rotate}deg) scale(${sx}, ${sy})`;
 
-    // Tight viewBox derived from actual puff geometry so the copied SVG has no
-    // excess whitespace. Padding mirrors the filter region declarations:
-    // the outer fuzz filter uses x="-15%" y="-30%" which is the widest extent
-    // that can be rendered; the inner filters (backfill/volume) are wider but
-    // clipped inside the group before fuzz runs.
-    const bbox = puffs.reduce(
-      (acc, p) => ({
-        x0: Math.min(acc.x0, p.cx - p.rx),
-        y0: Math.min(acc.y0, p.cy - p.ry),
-        x1: Math.max(acc.x1, p.cx + p.rx),
-        y1: Math.max(acc.y1, p.cy + p.ry),
-      }),
-      { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity },
+    // Memoize puff elements so they don't regenerate on every settings change —
+    // only when the puffs array itself changes (density / grid / drawn shape).
+    const puffEls = useMemo(
+      () =>
+        puffs.map((p, i) => (
+          <ellipse key={i} cx={p.cx} cy={p.cy} rx={p.rx} ry={p.ry} />
+        )),
+      [puffs],
     );
-    const pw = bbox.x1 - bbox.x0;
-    const ph = bbox.y1 - bbox.y0;
-    const padX = pw * 0.15 + settings.rand / n;
-    const padY = ph * 0.30 + settings.rand / n;
-    const viewBox = `${(bbox.x0 - padX).toFixed(1)} ${(bbox.y0 - padY).toFixed(1)} ${(pw + padX * 2).toFixed(1)} ${(ph + padY * 2).toFixed(1)}`;
+
+    if (puffs.length === 0) {
+      return (
+        <svg
+          ref={ref}
+          viewBox={fixedViewBox ?? '0 0 680 340'}
+          preserveAspectRatio="xMidYMid meet"
+          xmlns="http://www.w3.org/2000/svg"
+          style={{ transform, transformOrigin: 'center', opacity: settings.opacity, width: '100%', height: '100%' }}
+        />
+      );
+    }
+
+    // Use fixed viewBox if provided (drawing mode), otherwise compute tight bbox
+    // from puffs with filter-region padding so the export SVG has no excess space.
+    const viewBox = (() => {
+      if (fixedViewBox) return fixedViewBox;
+      const bbox = puffs.reduce(
+        (acc, p) => ({
+          x0: Math.min(acc.x0, p.cx - p.rx),
+          y0: Math.min(acc.y0, p.cy - p.ry),
+          x1: Math.max(acc.x1, p.cx + p.rx),
+          y1: Math.max(acc.y1, p.cy + p.ry),
+        }),
+        { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity },
+      );
+      const pw = bbox.x1 - bbox.x0;
+      const ph = bbox.y1 - bbox.y0;
+      const padX = pw * 0.15 + settings.rand / n;
+      const padY = ph * 0.30 + settings.rand / n;
+      return `${(bbox.x0 - padX).toFixed(1)} ${(bbox.y0 - padY).toFixed(1)} ${(pw + padX * 2).toFixed(1)} ${(ph + padY * 2).toFixed(1)}`;
+    })();
 
     return (
       <svg
@@ -172,11 +199,7 @@ export const Cloud = forwardRef<SVGSVGElement, CloudProps>(
             </feMerge>
           </filter>
 
-          <g id="puffs">
-            {puffs.map((p, i) => (
-              <ellipse key={i} cx={p.cx} cy={p.cy} rx={p.rx} ry={p.ry} />
-            ))}
-          </g>
+          <g id="puffs">{puffEls}</g>
         </defs>
 
         <g filter="url(#fuzz)">

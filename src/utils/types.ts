@@ -1,3 +1,5 @@
+export type DrawMode = 'brush' | 'eraser' | null;
+
 export type UpdateSetting = <K extends keyof CloudSettings>(
   key: K,
   value: CloudSettings[K],
@@ -11,6 +13,7 @@ export interface CloudSettings {
   dens: number;
   grid: number;
   lockGrid: boolean;
+  puffDir: boolean;
   fuzzy: number;
   rand: number;
   inset: number;

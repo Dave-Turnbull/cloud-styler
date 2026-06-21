@@ -5,6 +5,7 @@ export const DEFAULTS: CloudSettings = {
   dens: 1,
   grid: 1,
   lockGrid: true,
+  puffDir: false,
   fuzzy: 4,
   rand: 6,
   inset: 7,

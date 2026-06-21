@@ -1,14 +1,22 @@
 import type { ReactNode } from 'react';
-import type { CloudSettings, UpdateSetting } from '../../../utils/types';
+import type { CloudSettings, UpdateSetting, DrawMode } from '../../../utils/types';
 import { CardWrapper } from '../../atoms/CardWrapper/CardWrapper';
 import { Slider } from '../../atoms/Slider/Slider';
 import { ColourPicker } from '../../atoms/ColourPicker/ColourPicker';
 import { Checkbox } from '../../atoms/Checkbox/Checkbox';
+import { Button } from '../../atoms/Button/Button';
 import { Toolbar } from '../Toolbar/Toolbar';
 
 interface ControlPanelProps {
   settings: CloudSettings;
   update: UpdateSetting;
+  drawMode: DrawMode;
+  onToggleDrawMode: (mode: 'brush' | 'eraser') => void;
+  brushSize: number;
+  onBrushSizeChange: (size: number) => void;
+  onUndo: () => void;
+  onClearDrawing: () => void;
+  hasDrawing: boolean;
   onCopy: () => void;
   onExport: (format: 'png' | 'webp') => void;
   onReset: () => void;
@@ -33,6 +41,13 @@ const Hint = ({ children }: { children: ReactNode }) => (
 export function ControlPanel({
   settings,
   update,
+  drawMode,
+  onToggleDrawMode,
+  brushSize,
+  onBrushSizeChange,
+  onUndo,
+  onClearDrawing,
+  hasDrawing,
   onCopy,
   onExport,
   onReset,
@@ -46,6 +61,51 @@ export function ControlPanel({
         puff pattern itself — same layout, finer or coarser.
       </Sub>
 
+      <SectionHeading>Draw</SectionHeading>
+      <Sub>
+        Paint a base shape — the cloud forms from it in real time.
+      </Sub>
+
+      <CardWrapper title="Drawing tools">
+        <div className="flex flex-wrap gap-2 mb-3">
+          <Button
+            label="Brush"
+            onClick={() => onToggleDrawMode('brush')}
+            active={drawMode === 'brush'}
+          />
+          <Button
+            label="Eraser"
+            onClick={() => onToggleDrawMode('eraser')}
+            active={drawMode === 'eraser'}
+          />
+          <Button
+            label="Undo"
+            onClick={onUndo}
+            disabled={!hasDrawing}
+          />
+          <Button
+            label="Clear"
+            onClick={onClearDrawing}
+            disabled={!hasDrawing}
+          />
+        </div>
+        <Slider
+          label="Brush size"
+          min={8}
+          max={80}
+          step={2}
+          value={brushSize}
+          display={String(brushSize)}
+          onChange={onBrushSizeChange}
+          disabled={drawMode === null}
+        />
+        <Hint>
+          Draw to replace the default cloud shape. The cloud regenerates on
+          lift or every 500 ms while drawing. Thick strokes yield large puffs;
+          thin strokes yield small ones. Clear to restore the default shape.
+        </Hint>
+      </CardWrapper>
+
       <CardWrapper title="Colour">
         <ColourPicker
           label="Cloud colour"
@@ -56,46 +116,6 @@ export function ControlPanel({
           The picked colour is the shaded rim; the lit core lightens toward
           white automatically.
         </Hint>
-      </CardWrapper>
-
-      <CardWrapper title="Transform (whole cloud)">
-        <Slider
-          label="Scale"
-          min={0.2}
-          max={2}
-          step={0.05}
-          value={settings.scale}
-          display={`${f2(settings.scale)}×`}
-          onChange={(v) => update('scale', v)}
-        />
-        <Slider
-          label="Rotate"
-          min={-180}
-          max={180}
-          step={1}
-          value={settings.rotate}
-          display={`${settings.rotate}°`}
-          onChange={(v) => update('rotate', v)}
-        />
-        <Slider
-          label="Opacity"
-          min={0}
-          max={1}
-          step={0.02}
-          value={settings.opacity}
-          display={f2(settings.opacity)}
-          onChange={(v) => update('opacity', v)}
-        />
-        <Checkbox
-          label="Flip horizontally"
-          checked={settings.flipX}
-          onChange={(v) => update('flipX', v)}
-        />
-        <Checkbox
-          label="Flip vertically"
-          checked={settings.flipY}
-          onChange={(v) => update('flipY', v)}
-        />
       </CardWrapper>
 
       <SectionHeading>Puffs</SectionHeading>
@@ -127,6 +147,11 @@ export function ControlPanel({
           label="Lock grid to density"
           checked={settings.lockGrid}
           onChange={(v) => update('lockGrid', v)}
+        />
+        <Checkbox
+          label="Puff direction (left in front)"
+          checked={settings.puffDir}
+          onChange={(v) => update('puffDir', v)}
         />
         <Slider
           label="Puff fuzziness"

@@ -5,15 +5,8 @@ export interface Ellipse {
   ry: number;
 }
 
-interface Master {
-  cx: number;
-  cy: number;
-  rx: number;
-  ry: number;
-}
-
-/* Master puff layout at density 1. Edit to change the cloud shape. */
-const MASTER: Master[] = [
+/* Master puff layout at density 1. Defines the default cloud shape. */
+export const MASTER: Ellipse[] = [
   { cx: 340, cy: 212, rx: 205, ry: 44 },
   { cx: 168, cy: 196, rx: 46, ry: 40 },
   { cx: 200, cy: 176, rx: 38, ry: 43 },
@@ -40,18 +33,35 @@ function rng(seed: number): () => number {
   };
 }
 
+export interface PuffField {
+  puffs: Ellipse[];
+  baseCount: number; // puffs belonging to MASTER[0] (the base/bottom ellipse)
+}
+
 /**
  * Build the puff field.
  *   density n  -> puff SIZE (sub-radius = rx / n).
  *   count      -> how many puffs each master is split into (count x count).
  * When count <= 1, each master is one ellipse enlarged by 1/n.
+ * customMaster replaces the default MASTER array (used for drawn shapes).
  */
-export function buildPuffs(n: number, count: number): Ellipse[] {
+export function buildPuffs(
+  n: number,
+  count: number,
+  customMaster?: Ellipse[],
+): PuffField {
+  const source = customMaster ?? MASTER;
+  if (source.length === 0) return { puffs: [], baseCount: 0 };
+
   const r = rng(98765);
   const OVL = 1.3;
   const out: Ellipse[] = [];
+  let baseCount = 0;
 
-  for (const m of MASTER) {
+  for (let mi = 0; mi < source.length; mi++) {
+    const m = source[mi];
+    const before = out.length;
+
     if (count <= 1) {
       const f = 1 / n;
       out.push({
@@ -82,6 +92,10 @@ export function buildPuffs(n: number, count: number): Ellipse[] {
         }
       }
     }
+
+    // Only track baseCount for the default MASTER (used by puffDir feature)
+    if (!customMaster && mi === 0) baseCount = out.length - before;
   }
-  return out;
+
+  return { puffs: out, baseCount };
 }
