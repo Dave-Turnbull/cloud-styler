@@ -1,19 +1,18 @@
 import { useMemo, useRef, useState, useLayoutEffect } from 'react';
 import type { CloudSettings, DrawMode } from '../utils/types';
-import type { Ellipse } from '../utils/puffs';
 import { MASTER } from '../utils/puffs';
 import { DEFAULTS } from '../utils/defaults';
 import { buildPuffs } from '../utils/puffs';
 import { shapeToMaster, CANVAS_W, CANVAS_H } from '../utils/shapeToMaster';
+import type { MasterShape } from '../utils/shapeToMaster';
 import { Cloud } from '../components/molecules/Cloud/Cloud';
 import { ControlPanel } from '../components/molecules/ControlPanel/ControlPanel';
 import { DrawingCanvas } from '../components/molecules/DrawingCanvas/DrawingCanvas';
 import type { DrawingCanvasHandle } from '../components/molecules/DrawingCanvas/DrawingCanvas';
 
 const FIXED_VIEWBOX = `0 0 ${CANVAS_W} ${CANVAS_H}`;
-const ASPECT = CANVAS_W / CANVAS_H;
 
-function computeInitialMaster(): Ellipse[] {
+function computeInitialMaster(): MasterShape {
   const canvas = document.createElement('canvas');
   canvas.width = CANVAS_W;
   canvas.height = CANVAS_H;
@@ -33,7 +32,7 @@ export function CloudStylerPage() {
   const [drawMode, setDrawMode] = useState<DrawMode>(null);
   const [brushSize, setBrushSize] = useState(20);
   const [overlayOpacity, setOverlayOpacity] = useState(0.4);
-  const [customMaster, setCustomMaster] = useState<Ellipse[]>(computeInitialMaster);
+  const [customMaster, setCustomMaster] = useState<MasterShape>(computeInitialMaster);
 
   const svgRef = useRef<SVGSVGElement>(null);
   const drawingRef = useRef<DrawingCanvasHandle>(null);
@@ -67,7 +66,7 @@ export function CloudStylerPage() {
     setDrawMode((prev) => (prev === mode ? null : mode));
   }
 
-  function handleShapeChange(master: Ellipse[]) {
+  function handleShapeChange(master: MasterShape) {
     setCustomMaster(master);
   }
 
@@ -90,7 +89,7 @@ export function CloudStylerPage() {
   }
 
   const { puffs: rawPuffs, baseCount } = useMemo(
-    () => buildPuffs(settings.dens, settings.grid, customMaster),
+    () => buildPuffs(settings.dens, settings.grid, customMaster.ellipses, customMaster.baseCount),
     [settings.dens, settings.grid, customMaster],
   );
 
@@ -173,9 +172,6 @@ export function CloudStylerPage() {
     }
   }
 
-  // Keep TypeScript happy: ASPECT is used in the JSX comment below
-  void ASPECT;
-
   return (
     <div className="flex min-h-screen max-[880px]:flex-col">
       {/*
@@ -184,7 +180,7 @@ export function CloudStylerPage() {
       */}
       <div
         ref={stageRef}
-        className="flex-1 min-h-[46vh] flex items-center justify-center p-6 bg-[radial-gradient(120%_90%_at_50%_0%,#cfe2f1_0%,#dceaf4_55%,#e9f1f8_100%)]"
+        className="flex-1 min-w-0 overflow-hidden min-h-[46vh] flex items-center justify-center bg-[radial-gradient(120%_90%_at_50%_0%,#cfe2f1_0%,#dceaf4_55%,#e9f1f8_100%)]"
       >
         {/*
           Wrapper: pixel-exact size of the letterboxed SVG area.
@@ -223,7 +219,7 @@ export function CloudStylerPage() {
         onOverlayOpacityChange={setOverlayOpacity}
         onUndo={handleUndo}
         onClearDrawing={handleClearDrawing}
-        hasDrawing={customMaster.length > 0}
+        hasDrawing={customMaster.ellipses.length > 0}
         onCopy={handleCopy}
         onExport={handleExport}
         onReset={handleReset}

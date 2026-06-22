@@ -40,15 +40,19 @@ export interface PuffField {
 
 /**
  * Build the puff field.
- *   density n  -> puff SIZE (sub-radius = rx / n).
- *   count      -> how many puffs each master is split into (count x count).
- * When count <= 1, each master is one ellipse enlarged by 1/n.
- * customMaster replaces the default MASTER array (used for drawn shapes).
+ *   density n         -> puff SIZE (sub-radius = rx / n).
+ *   count             -> how many puffs each master is split into (count × count).
+ *   customMaster      -> replaces MASTER (used for drawn shapes).
+ *   baseMasterCount   -> how many leading masters in customMaster are flat base
+ *                        puffs (from shapeToMaster). The resulting puffs from
+ *                        those masters are tracked in the returned baseCount so
+ *                        CloudStylerPage can apply puffDir only to interior puffs.
  */
 export function buildPuffs(
   n: number,
   count: number,
   customMaster?: Ellipse[],
+  baseMasterCount?: number,
 ): PuffField {
   const source = customMaster ?? MASTER;
   if (source.length === 0) return { puffs: [], baseCount: 0 };
@@ -93,8 +97,11 @@ export function buildPuffs(
       }
     }
 
-    // Only track baseCount for the default MASTER (used by puffDir feature)
-    if (!customMaster && mi === 0) baseCount = out.length - before;
+    // Track which rendered puffs came from base masters.
+    const isBase = customMaster
+      ? (baseMasterCount !== undefined && mi < baseMasterCount)
+      : mi === 0;
+    if (isBase) baseCount += out.length - before;
   }
 
   return { puffs: out, baseCount };

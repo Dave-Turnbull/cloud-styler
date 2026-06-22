@@ -1,5 +1,6 @@
 import { forwardRef, useImperativeHandle, useRef, useState, useEffect } from 'react';
 import { shapeToMaster, CANVAS_W, CANVAS_H, MAX_UNDO } from '../../../utils/shapeToMaster';
+import type { MasterShape } from '../../../utils/shapeToMaster';
 import type { Ellipse } from '../../../utils/puffs';
 
 export interface DrawingCanvasHandle {
@@ -15,7 +16,7 @@ interface DrawingCanvasProps {
   overlayOpacity: number;
   /** Colour used for brush strokes (should match the cloud colour). */
   brushColor: string;
-  onShapeChange: (master: Ellipse[]) => void;
+  onShapeChange: (master: MasterShape) => void;
   initialEllipses: Ellipse[];
 }
 
